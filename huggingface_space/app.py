@@ -21,6 +21,7 @@ import gradio as gr
 import joblib
 
 MODEL_PATH = os.path.join("models", "toxicity_model.joblib")
+METADATA_PATH = os.path.join("models", "metadata.joblib")
 
 # ---------------------------------------------------------------------------
 # Text cleaning — must match the preprocessing used during training
@@ -41,10 +42,17 @@ def clean_text(text: str) -> str:
 
 print(f"Loading model from {MODEL_PATH} ...")
 model = joblib.load(MODEL_PATH)
-print("Model loaded.")
+
+# Use the exact decision threshold chosen and validated in the notebook
+# (falls back to 0.5 only if metadata isn't present, e.g. an older model export).
+DEFAULT_THRESHOLD = 0.5
+if os.path.exists(METADATA_PATH):
+    metadata = joblib.load(METADATA_PATH)
+    DEFAULT_THRESHOLD = metadata.get("threshold", DEFAULT_THRESHOLD)
+print(f"Model loaded. Using decision threshold = {DEFAULT_THRESHOLD}")
 
 
-def predict_toxicity(text: str, threshold: float = 0.5) -> dict:
+def predict_toxicity(text: str, threshold: float = DEFAULT_THRESHOLD) -> dict:
     """Predict whether a piece of text is toxic. See notebook Section 7 for details."""
     if not text or not str(text).strip():
         return {
@@ -155,10 +163,10 @@ with gr.Blocks(title="Text Toxicity Moderation") as demo:
     gr.Markdown(
         """
         ---
-        ⚠️ **Disclaimer:** This is an educational demo trained on a small
-        sample dataset. It is not intended for production moderation
-        decisions without further validation on a larger, representative
-        dataset.
+        ⚠️ **Disclaimer:** This is an educational demo trained on a real-world
+        public dataset (Civil Comments, 80,000 rows). It is not intended for
+        production moderation decisions without further validation, bias
+        auditing, and a larger training set.
         """
     )
 

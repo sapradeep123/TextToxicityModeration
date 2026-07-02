@@ -4,9 +4,15 @@ A complete, end-to-end machine learning project that trains a model to
 detect toxic (abusive/insulting/harassing) text and moderates it — built for
 Assignment #4.
 
-**Pipeline:** raw text → cleaning → TF-IDF features → Logistic Regression /
-Linear SVM → evaluation → `predict_toxicity()` function → Gradio demo app →
-Hugging Face Spaces deployment.
+**Pipeline:** raw text → cleaning → TF-IDF features → Logistic Regression →
+threshold tuning → evaluation → `predict_toxicity()` function → Gradio demo
+app → Hugging Face Spaces deployment.
+
+> **v2 update:** retrained on a real-world public dataset (80,000-row
+> sample of Civil Comments) instead of the original 100-row demo sample,
+> with a tuned decision threshold to fix false positives on clearly polite
+> text (e.g. "You are a wonderful person." was previously mis-flagged as
+> toxic). See "Model & results" below.
 
 ## Project structure
 
@@ -16,12 +22,14 @@ Hugging Face Spaces deployment.
 ├── app.py                           # Gradio demo app (local)
 ├── requirements.txt                 # project dependencies
 ├── data/
-│   ├── generate_sample_data.py      # regenerates the offline sample dataset
-│   ├── sample_toxicity_data.csv     # 100-row offline sample (50 toxic / 50 clean)
-│   └── README.md                    # dataset details + real-dataset download instructions
+│   ├── prepare_real_dataset.py      # downloads & prepares the real Civil Comments dataset
+│   ├── generate_sample_data.py      # regenerates the tiny offline fallback sample
+│   ├── sample_toxicity_data.csv     # 100-row offline fallback sample (demo/pipeline-check only)
+│   ├── raw/train.csv                # real dataset used for training (80,000 rows, committed)
+│   └── README.md                    # dataset details + download instructions
 ├── models/
-│   ├── toxicity_model.joblib        # trained pipeline (TF-IDF + classifier)
-│   └── metadata.joblib              # model choice + evaluation metrics
+│   ├── toxicity_model.joblib        # trained pipeline (TF-IDF + Logistic Regression)
+│   └── metadata.joblib              # model choice, threshold, and evaluation metrics
 └── huggingface_space/                # self-contained package ready to deploy to HF Spaces
     ├── app.py
     ├── requirements.txt
@@ -46,8 +54,9 @@ of the notebook for the full discussion.
 # 1. Install dependencies
 pip install -r requirements.txt
 
-# 2. (Optional) regenerate the sample dataset
-python data/generate_sample_data.py
+# 2. (Optional) regenerate the real dataset from Hugging Face (already committed at data/raw/train.csv)
+pip install datasets
+python data/prepare_real_dataset.py
 
 # 3. Run the notebook top-to-bottom (Jupyter, or via nbconvert)
 jupyter notebook text_toxicity_moderation.ipynb
@@ -63,43 +72,65 @@ browser, type text into the box, and click **Analyze**.
 
 ## Dataset
 
-Ships with a small, hand-curated **offline sample dataset**
-(`data/sample_toxicity_data.csv`, 100 rows) so the notebook runs with zero
-setup. For a real, production-quality model, download the
-[Jigsaw Toxic Comment Classification](https://www.kaggle.com/competitions/jigsaw-toxic-comment-classification-challenge/data)
-dataset (or Civil Comments) and drop it at `data/raw/train.csv` — the
-notebook automatically picks it up. Full instructions: `data/README.md`.
+Trained on **80,000 real comments** sampled from
+[`google/civil_comments`](https://huggingface.co/datasets/google/civil_comments)
+(the dataset behind the Jigsaw "Unintended Bias in Toxicity Classification"
+competition), downloaded with no authentication required and committed to
+this repo at `data/raw/train.csv`. Civil Comments was used instead of the
+Kaggle-hosted Jigsaw Toxic Comment Classification CSV because the latter
+requires a personal Kaggle account/API token; instructions to swap it in
+anyway are in `data/README.md`. A tiny 100-row hand-written sample
+(`data/sample_toxicity_data.csv`) remains as a zero-setup fallback only —
+it is **not** used for the model shipped in this repo, since it's too small
+to generalize (that's what originally caused false positives — see below).
 
 ## Model & results
 
-Two classic, fast, GPU-free models are trained and compared on TF-IDF
-features (word unigrams + bigrams):
+**TF-IDF + Logistic Regression** (`max_features=40000`, unigrams+bigrams,
+`min_df=2`, mild `class_weight={0: 1, 1: 2}`), trained on 63,769 rows,
+evaluated on a held-out 15,943-row test set, with a tuned decision
+**threshold of 0.30** (instead of the naive 0.5 cutoff) chosen specifically
+to reduce false positives on clean/polite text:
 
-- **Option A:** TF-IDF + Logistic Regression (calibrated probabilities out of the box)
-- **Option B:** TF-IDF + Linear SVM (via `CalibratedClassifierCV` for probabilities)
+| metric | value |
+|---|---|
+| Accuracy | 0.935 |
+| Precision (toxic) | 0.595 |
+| Recall (toxic) | 0.514 |
+| F1 (toxic) | 0.552 |
 
-The notebook automatically selects whichever scores higher F1 on the held-out
-test set, reports accuracy/precision/recall/F1, a confusion matrix, and
-inspects false-positive/false-negative examples. Exact numbers depend on
-which dataset you train on (sample vs. real) — see the notebook output for
-the run's actual metrics (`models/metadata.joblib` stores them
-programmatically).
+Full confusion matrix, precision/recall-vs-threshold sweep, and
+false-positive/false-negative examples are in notebook Section 6.
+`models/metadata.joblib` stores these numbers programmatically.
 
-> **Note:** with only the 100-row sample dataset, metrics and confidence
-> scores are modest — this is expected for a tiny demo dataset and is
-> discussed in the notebook. Swap in the real Jigsaw dataset (see
-> `data/README.md`) for a model you'd actually trust in production.
+**Required sentence verification** (notebook Section 7, asserted in-notebook):
+
+| text | expected | predicted | toxic score |
+|---|---|---|---|
+| "Hello" | Non-toxic | Non-toxic | 0.047 |
+| "Thank you" | Non-toxic | Non-toxic | 0.021 |
+| "You are a wonderful person." | Non-toxic | Non-toxic | 0.220 |
+| "You are stupid." | Toxic | Toxic | 1.000 |
+| "I hate you." | Toxic | Toxic | 0.362 |
+| "You are useless." | Toxic | Toxic | 0.789 |
+
+> This is a lightweight classic-ML baseline, not a state-of-the-art
+> transformer — precision/recall on ambiguous or sarcastic text will still
+> be imperfect. See notebook Section 9 for how to source more data and
+> Section 8 for a path to a stronger (multilingual) model.
 
 ## Gradio demo
 
-`app.py` loads `models/toxicity_model.joblib` and provides a simple UI:
-enter text → click **Analyze** → see the Toxic/Non-toxic label, a confidence
-score, and friendly moderation advice.
+`app.py` loads `models/toxicity_model.joblib` + `models/metadata.joblib`
+(for the tuned threshold) and provides a simple UI: enter text → click
+**Analyze** → see the Toxic/Non-toxic label, a confidence score, and
+friendly moderation advice.
 
 ## Deploying to Hugging Face Spaces
 
-The `huggingface_space/` folder is a ready-to-upload package. See
-`huggingface_space/README.md` (and notebook Section 11) for full steps:
+The `huggingface_space/` folder is a ready-to-upload package (already
+updated with the retrained model). See `huggingface_space/README.md` (and
+notebook Section 11) for full steps:
 
 1. Create a Space on [huggingface.co](https://huggingface.co) with SDK = Gradio.
 2. Push the contents of `huggingface_space/` to the Space's git repo.
@@ -122,7 +153,6 @@ considerations.
 
 ## Disclaimer
 
-Educational assignment project. The bundled sample dataset and trained model
-are for demonstration only — not a production-grade content moderation
-system without further validation, bias auditing, and training on a larger
-real-world dataset.
+Educational assignment project. Trained on a real public dataset but at a
+small-to-moderate scale — not a production-grade content moderation system
+without further validation, bias auditing, and a larger training set.

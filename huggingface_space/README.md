@@ -15,22 +15,32 @@ license: mit
 Type any comment/message into the box and click **Analyze** to see whether
 an automated moderation classifier would flag it as toxic.
 
-- **Model:** TF-IDF (word 1-2 grams) + Logistic Regression / Linear SVM
-  (whichever scored higher F1 during training), scikit-learn `Pipeline`.
-- **Training data:** see the parent project's `text_toxicity_moderation.ipynb`
-  notebook and `data/README.md` for dataset details (sample dataset shipped
-  in-repo, with instructions to swap in the full Jigsaw Toxic Comment
-  Classification dataset for production use).
+- **Model:** TF-IDF (word 1-2 grams) + Logistic Regression, scikit-learn
+  `Pipeline`, with a tuned decision threshold (0.30, stored in
+  `models/metadata.joblib` and loaded automatically by `app.py`).
+- **Training data:** 80,000 real comments sampled from
+  [`google/civil_comments`](https://huggingface.co/datasets/google/civil_comments)
+  (the dataset behind the Jigsaw "Unintended Bias in Toxicity
+  Classification" competition). See the parent project's
+  `text_toxicity_moderation.ipynb` notebook and `data/README.md` for full
+  dataset details.
 - **Output:** Toxic / Non-toxic label, a confidence score, and a friendly
   moderation-advice message.
+- **Test-set metrics:** accuracy 0.935, precision 0.595, recall 0.514,
+  F1 0.552 (toxic class; see the notebook for the full confusion matrix and
+  threshold sweep).
 
 ## Try these examples
 
 | Text | Expected |
 |---|---|
+| "Hello" | Non-toxic |
+| "Thank you" | Non-toxic |
+| "You are a wonderful person." | Non-toxic |
+| "You are stupid." | Toxic |
+| "I hate you." | Toxic |
+| "You are useless." | Toxic |
 | "Thank you so much for your help, this really solved my problem!" | Non-toxic |
-| "You are such an idiot, nobody wants to hear your opinion." | Toxic |
-| "Could you please clarify the refund policy for this order?" | Non-toxic |
 | "Shut up already, your comments are garbage and so are you." | Toxic |
 
 ## Files in this Space
@@ -59,7 +69,8 @@ an automated moderation classifier would flag it as toxic.
 
 ## Disclaimer
 
-This is an educational assignment demo trained on a small sample dataset. It
-is not intended for production moderation decisions without retraining on a
-larger, representative, and bias-audited dataset (see the notebook's
-"Multilingual Discussion" and "Real-world Data Sources" sections).
+This is an educational assignment demo trained on a real but moderately
+sized public dataset (80,000 rows). It is not intended for production
+moderation decisions without retraining on a larger, representative, and
+bias-audited dataset (see the notebook's "Multilingual Discussion" and
+"Real-world Data Sources" sections).
